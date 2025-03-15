@@ -1,0 +1,8 @@
+---
+- name: Update APT packages
+  hosts: "{{ target_hosts }}"  # Ambil target dari extra vars
+  become: yes
+  tasks:
+    - name: Update package list
+      apt:
+        update_cache: yes

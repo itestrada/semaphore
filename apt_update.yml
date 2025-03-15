@@ -1,8 +1,12 @@
 ---
-- name: Update APT packages
-  hosts: "{{ target_hosts }}"  # Ambil target dari extra vars
+- name: Update & Upgrade Ubuntu Packages
+  hosts: all
   become: yes
   tasks:
     - name: Update package list
       apt:
         update_cache: yes
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist

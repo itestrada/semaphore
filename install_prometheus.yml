@@ -53,7 +53,7 @@
         remote_src: yes
 
     - name: Move Prometheus binaries
-      command: mv /tmp/prometheus-{{ prometheus_version }}-linux-amd64/prometheus /tmp/prometheus-{{ prometheus_version }}-linux-amd64/promtool {{ prometheus_install_dir }}
+      command: mv /tmp/prometheus-{{ prometheus_version }}.linux-amd64/prometheus /tmp/prometheus-{{ prometheus_version }}.linux-amd64/promtool {{ prometheus_install_dir }}
     
     - name: Set permissions for Prometheus binaries
       file:
@@ -66,7 +66,7 @@
         - "{{ prometheus_install_dir }}/promtool"
 
     - name: Move Prometheus config files
-      command: mv /tmp/prometheus-{{ prometheus_version }}-linux-amd64/consoles /tmp/prometheus-{{ prometheus_version }}-linux-amd64/console_libraries {{ prometheus_config_dir }}
+      command: mv /tmp/prometheus-{{ prometheus_version }}.linux-amd64/consoles /tmp/prometheus-{{ prometheus_version }}.linux-amd64/console_libraries {{ prometheus_config_dir }}
 
     - name: Copy Prometheus configuration file
       template:

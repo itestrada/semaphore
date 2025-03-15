@@ -1,7 +1,16 @@
 ---
-- name: Deploy Prometheus
+- name: Install and Configure Prometheus
   hosts: "{{ target_hosts }}"
   become: true
+
+  vars:
+    prometheus_version: "2.44.0"
+    prometheus_user: "prometheus"
+    prometheus_group: "prometheus"
+    prometheus_install_dir: "/usr/local/bin"
+    prometheus_config_dir: "/etc/prometheus"
+    prometheus_data_dir: "/var/lib/prometheus"
+    prometheus_service_file: "/etc/systemd/system/prometheus.service"
 
   tasks:
     - name: Update apt cache
@@ -10,29 +19,109 @@
 
     - name: Install prerequisite packages
       apt:
-        name: "{{ item }}"
+        name:
+          - wget
+          - tar
         state: present
+
+    - name: Create Prometheus group
+      group:
+        name: "{{ prometheus_group }}"
+        system: yes
+
+    - name: Create Prometheus user
+      user:
+        name: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        shell: /sbin/nologin
+        system: yes
+
+    - name: Create necessary directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
       loop:
-        - apt-transport-https
-        - software-properties-common
+        - "{{ prometheus_config_dir }}"
+        - "{{ prometheus_data_dir }}"
 
-    - name: Add Prometheus APT repository
-      apt_repository:
-        repo: deb https://packages.grafana.com/oss/deb stable main
-        state: present
-        update_cache: yes
+    - name: Download Prometheus
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
 
-    - name: Import GPG key for Prometheus
-      apt_key:
-        url: https://packages.grafana.com/gpg.key
-        state: present
+    - name: Extract Prometheus
+      unarchive:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/"
+        remote_src: yes
 
-    - name: Install Prometheus
-      apt:
-        name: prometheus
-        state: present
+    - name: Install Prometheus binaries
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: "{{ prometheus_install_dir }}/{{ item }}"
+        mode: '0755'
+      loop:
+        - prometheus
+        - promtool
 
-    - name: Start Prometheus service
+    - name: Copy console libraries
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/consoles"
+        dest: "{{ prometheus_config_dir }}/consoles"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Copy console templates
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/console_libraries"
+        dest: "{{ prometheus_config_dir }}/console_libraries"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Copy Prometheus configuration file
+      template:
+        src: prometheus.yml.j2
+        dest: "{{ prometheus_config_dir }}/prometheus.yml"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        mode: '0644'
+
+    - name: Create Prometheus systemd service file
+      copy:
+        dest: "{{ prometheus_service_file }}"
+        content: |
+          [Unit]
+          Description=Prometheus Monitoring
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User={{ prometheus_user }}
+          Group={{ prometheus_group }}
+          Type=simple
+          ExecStart={{ prometheus_install_dir }}/prometheus \
+            --config.file={{ prometheus_config_dir }}/prometheus.yml \
+            --storage.tsdb.path={{ prometheus_data_dir }} \
+            --web.console.templates={{ prometheus_config_dir }}/consoles \
+            --web.console.libraries={{ prometheus_config_dir }}/console_libraries
+
+          [Install]
+          WantedBy=multi-user.target
+      owner: root
+      group: root
+      mode: '0644'
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start Prometheus service
       systemd:
         name: prometheus
         state: started

@@ -1,71 +1,103 @@
----
-- name: Install Node Exporter v1.9.0
-  hosts: "{{ target_hosts }}"
+- name: Install Node Exporter on Ubuntu & RedHat-based OS
+  hosts: all
   become: yes
-  tasks:
+  vars:
+    node_exporter_version: "1.9.0"
+    node_exporter_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    install_path: "/usr/local/bin"
+    service_name: "node_exporter"
+    user_name: "node_exporter"
+    group_name: "node_exporter"
 
-    - name: Download Node Exporter v1.9.0
-      get_url:
-        url: "https://github.com/prometheus/node_exporter/releases/download/v1.9.0/node_exporter-1.9.0.linux-amd64.tar.gz"
+  tasks:
+    - name: Detect OS Family
+      ansible.builtin.debug:
+        msg: "Running on {{ ansible_os_family }} ({{ ansible_distribution }})"
+
+    - name: Install required dependencies (Ubuntu)
+      ansible.builtin.apt:
+        name: 
+          - wget
+          - tar
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install required dependencies (RedHat)
+      ansible.builtin.yum:
+        name: 
+          - wget
+          - tar
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Create node_exporter user
+      ansible.builtin.user:
+        name: "{{ user_name }}"
+        shell: /sbin/nologin
+        system: yes
+        create_home: no
+
+    - name: Download Node Exporter
+      ansible.builtin.get_url:
+        url: "{{ node_exporter_url }}"
         dest: "/tmp/node_exporter.tar.gz"
-        mode: '0644'
 
     - name: Extract Node Exporter
       ansible.builtin.unarchive:
         src: "/tmp/node_exporter.tar.gz"
-        dest: "/usr/local/bin/"
+        dest: "{{ install_path }}"
         remote_src: yes
-        extra_opts: [--strip-components=1]
-
-    - name: Create Node Exporter user
-      ansible.builtin.user:
-        name: node_exporter
-        shell: /usr/sbin/nologin
-        system: yes
-
-    - name: Set ownership for Node Exporter
-      ansible.builtin.file:
-        path: "/usr/local/bin/node_exporter"
-        owner: node_exporter
-        group: node_exporter
+        extra_opts: ["--strip-components=1"]
+        owner: "{{ user_name }}"
+        group: "{{ group_name }}"
         mode: '0755'
 
-    - name: Create Node Exporter systemd service
+    - name: Create systemd service file
       ansible.builtin.copy:
         dest: "/etc/systemd/system/node_exporter.service"
         content: |
           [Unit]
-          Description=Node Exporter v1.9.0
+          Description=Node Exporter
           After=network.target
 
           [Service]
-          User=node_exporter
-          Group=node_exporter
-          ExecStart=/usr/local/bin/node_exporter
+          User={{ user_name }}
+          Group={{ group_name }}
+          Type=simple
+          ExecStart={{ install_path }}/node_exporter
+          Restart=always
 
           [Install]
           WantedBy=multi-user.target
         mode: '0644'
 
-    - name: Reload systemd
+    - name: Reload systemd and enable Node Exporter
       ansible.builtin.systemd:
+        name: "{{ service_name }}"
         daemon_reload: yes
-
-    - name: Start and enable Node Exporter service
-      ansible.builtin.systemd:
-        name: node_exporter
-        state: started
         enabled: yes
+        state: started
 
-    - name: Allow firewall rule for Node Exporter (9100/tcp)
-      ansible.builtin.firewalld:
-        port: 9100/tcp
-        permanent: yes
-        state: enabled
+    - name: Open firewall port 9100 (Ubuntu - UFW)
+      community.general.ufw:
+        rule: allow
+        port: "9100"
+        proto: tcp
+      when: ansible_os_family == "Debian"
+
+    - name: Open firewall port 9100 (RedHat - Firewalld)
+      ansible.builtin.shell: |
+        firewall-cmd --add-port=9100/tcp --permanent
+        firewall-cmd --reload
+      when: ansible_os_family == "RedHat"
       ignore_errors: yes
 
-    - name: Restart firewall
-      ansible.builtin.systemd:
-        name: firewalld
-        state: restarted
-      ignore_errors: yes
+    - name: Verify Node Exporter is running
+      ansible.builtin.command: "systemctl status node_exporter"
+      register: service_status
+      changed_when: false
+
+    - name: Show Node Exporter status
+      ansible.builtin.debug:
+        msg: "{{ service_status.stdout }}"

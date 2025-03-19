@@ -1,0 +1,65 @@
+---
+- name: Install and Configure SNMP Exporter
+  hosts: "{{ target_hosts }}"
+  become: yes
+  tasks:
+
+    - name: Download SNMP Exporter
+      get_url:
+        url: "https://github.com/prometheus/snmp_exporter/releases/download/v0.28.0/snmp_exporter-0.28.0.linux-amd64.tar.gz"
+        dest: "/tmp/snmp_exporter-0.28.0.linux-amd64.tar.gz"
+
+    - name: Extract SNMP Exporter
+      ansible.builtin.unarchive:
+        src: "/tmp/snmp_exporter-0.28.0.linux-amd64.tar.gz"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - name: Copy SNMP Exporter binary to /usr/local/bin
+      copy:
+        src: "/tmp/snmp_exporter-0.28.0.linux-amd64/snmp_exporter"
+        dest: "/usr/local/bin/snmp_exporter"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Copy snmp.yml configuration
+      copy:
+        src: "/tmp/snmp_exporter-0.28.0.linux-amd64/snmp.yml"
+        dest: "/usr/local/bin/snmp.yml"
+        mode: '0644'
+        remote_src: yes
+
+    - name: Create Prometheus system user
+      user:
+        name: prometheus
+        system: yes
+        create_home: no
+        shell: /usr/sbin/nologin
+
+    - name: Create SNMP Exporter systemd service file
+      copy:
+        dest: "/etc/systemd/system/snmp-exporter.service"
+        content: |
+          [Unit]
+          Description=Prometheus SNMP Exporter Service
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=prometheus
+          ExecStart=/usr/local/bin/snmp_exporter --config.file="/usr/local/bin/snmp.yml"
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Start and enable SNMP Exporter service
+      systemd:
+        name: snmp-exporter
+        state: started
+        enabled: yes
